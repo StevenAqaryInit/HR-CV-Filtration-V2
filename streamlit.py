@@ -15,8 +15,8 @@ from st_aggrid import AgGrid
 # import openai
 import concurrent.futures
 import joblib
-
-
+import matplotlib.pyplot as plt
+import plotly.express as px
 
 
 nltk.download('stopwords')
@@ -201,11 +201,18 @@ if clean_keywords != '':
             thread = executor.submit(get_scores, cv, clean_keywords)
             result_value = thread.result()
             scores.append(result_value)
-        
+    
     df['scores'] = scores
     df['scores'] = df['scores'] * 100
 
     record = show(df[['bytes', 'title', 'scores', 'postition', 'phone_number']].sort_values(by='scores', ascending=False).drop_duplicates())
+    st.bar_chart(df['postition'].value_counts())
+
+    # fig, ax = plt.subplots()
+    fig = px.pie(df, names='postition', title='Positions Percentage')
+
+    st.plotly_chart(fig, use_container_width=True)
+
     try:
         row = df[df['title']==record['title']]
         print(row)
@@ -226,8 +233,6 @@ if clean_keywords != '':
 
 else:
     st.error('Enter Some Keywords...')
-
-
 
 
 
