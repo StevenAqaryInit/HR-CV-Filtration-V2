@@ -21,3 +21,6 @@ docx2txt==0.8
 python-docx==1.1.0
 docx==0.2.4
 streamlit-aggrid==0.3.4.post3
+matplotlib==3.8.3
+matplotlib-inline==0.1.6
+plotly==5.20.0
