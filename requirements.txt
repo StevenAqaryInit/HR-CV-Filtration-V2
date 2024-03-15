@@ -24,3 +24,4 @@ streamlit-aggrid==0.3.4.post3
 matplotlib==3.8.3
 matplotlib-inline==0.1.6
 plotly==5.20.0
+pdfminer.six==20231228
