@@ -15,9 +15,8 @@ from st_aggrid import AgGrid
 # import openai
 import concurrent.futures
 import joblib
-import matplotlib.pyplot as plt
 import plotly.express as px
-
+from pdfminer.high_level import extract_text
 
 nltk.download('stopwords')
 nltk.download('punkt')
@@ -32,12 +31,10 @@ stop_words = set(stopwords.words('english'))
 vectorizer = CountVectorizer(stop_words='english')
 
 
-# client = openai.OpenAI(api_key="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")
-
 
 @st.cache
 def get_main_phones(raw_phone_numbers):
-    phone_pattern = re.compile(r'(?:(?:\d{3}-\d{7,8}|\d{2}-\d{7,8}|\+\d{2,3}-?\d{9,10}|\d{3}-\d{3}-\d{4}|\d{4,})|\+\d{12}|\d{2}-\d{5,6}-\d{4}|\d{14}|\d{2}-\d{9,10})')
+    phone_pattern = re.compile(r'\d*\.?\d+')
     phone_numbers = [match.group() for match in phone_pattern.finditer(raw_phone_numbers)]
     for phone in phone_numbers:
         if len(phone) > 8:
@@ -51,13 +48,12 @@ def show(df):
         gd = GridOptionsBuilder.from_dataframe(df.iloc[:, 1:])
         gd.configure_selection(selection_mode='single'
                             , use_checkbox=True)
+        gd.configure_grid_options(alwaysShowVerticalScroll = True, enableRangeSelection=True, pagination=True)
         grid_options = gd.build()
 
         grid_table = AgGrid(df
                             , gridOptions=grid_options
-                            , reload_data=False
-                            , allow_unsafe_jscode=True
-                            , height=500)
+                            , height=600)
         
         values = list(grid_table['selected_rows'][0].values())[1:]
         keys = list(grid_table['selected_rows'][0].keys())[1:]
@@ -76,8 +72,6 @@ def filter_text(text_content):
     tokens = word_tokenize(text_content)
     filtered_tokens = [word for word in tokens if word.lower() not in stop_words]
     text = ' '.join(filtered_tokens)
-    translation_table = str.maketrans('', '', string.punctuation)
-    text = text.translate(translation_table)
 
     return text.lower()
 
@@ -89,28 +83,23 @@ def read_docx(file):
     for paragraph in doc.paragraphs:
         text_content += ' '.join(paragraph.text.split('\n'))
 
-    cleaned_text = filter_text(text_content)
-    return cleaned_text
+    new_text = ' '.join(text_content.split('\n'))
+    return new_text.lower().strip()
 
 
 @st.cache
 def read_pdf(file):
-    pdfReader = PyPDF2.PdfReader(file)
-
-    pages_list = ''
-    for page in pdfReader.pages:
-        pages_list += ' '.join(page.extract_text().split('\n'))
-
-    cleaned_text = filter_text(pages_list)
-    return cleaned_text
+    text = extract_text(pdf_file=file)
+    new_text = ' '.join(text.split('\n'))
+    return new_text.strip().lower()
 
 
 @st.cache
 def get_files_content(cv):
     file_bytes = b''
-    # nationality = postition = phone_number = ''
 
     if cv.name.split('.')[-1] == 'pdf':
+        # file_bytes = io.BytesIO(cv.read())
         file_bytes = io.BytesIO(cv.read())
         cleaned_text = read_pdf(file_bytes)
 
@@ -125,17 +114,16 @@ def get_files_content(cv):
     x_data = vectorizer.transform([cleaned_text])
     postition = model.predict(x_data)[0]
 
-    # postition = chat(cleaned_text.lower(), '''
-    # what is the postition of this person ?.  give me the position only without any comments from you
-    # ''')
+    email_pattern = r'[\w\.-]+@[\w\.-]+'
 
-    # nationality = chat(cleaned_text.lower(), '''
-    # what is the nationality of this person ?.  give me the nationality only without any comments from you
-    #     ''')
-
-    phone_number = get_main_phones(cleaned_text.lower())
-
-    return postition, phone_number, file_bytes, cleaned_text
+    emails = ''
+    try:
+        emails = re.findall(email_pattern, cleaned_text)[0]
+    except:
+        pass
+    
+    phone_number = get_main_phones(''.join(cleaned_text.split()).lower())
+    return postition, phone_number, emails, file_bytes, cleaned_text
 
 
 # @st.cache
@@ -144,7 +132,7 @@ def go_to_threads(files):
     files_bytes = []
     position_list = []
     phone_number_list = []
-    # nationality_list = []
+    email_list = []
 
 
     for cv in files:
@@ -157,8 +145,9 @@ def go_to_threads(files):
             
             position_list.append(result_value[0])
             phone_number_list.append(result_value[1])
-            files_bytes.append(result_value[2])
-            cleaned_text =  result_value[3]
+            email_list.append(result_value[2])
+            files_bytes.append(result_value[3])
+            cleaned_text =  result_value[4]
             titles.append(cv.name)
             df = pd.concat([df, pd.DataFrame([cleaned_text.lower()], columns=['cv'])], ignore_index=True)
             
@@ -168,6 +157,7 @@ def go_to_threads(files):
     df['bytes'] = files_bytes
     df['postition'] = position_list
     df['phone_number'] = phone_number_list
+    df['email'] = email_list
     # df['nationality'] = nationality_list
 
     return df
@@ -205,17 +195,13 @@ if clean_keywords != '':
     df['scores'] = scores
     df['scores'] = df['scores'] * 100
 
-    record = show(df[['bytes', 'title', 'scores', 'postition', 'phone_number']].sort_values(by='scores', ascending=False).drop_duplicates())
-    st.bar_chart(df['postition'].value_counts())
-
-    # fig, ax = plt.subplots()
-    fig = px.pie(df, names='postition', title='Positions Percentage')
-
-    st.plotly_chart(fig, use_container_width=True)
-
+    record = show(df[['bytes', 'title', 'scores', 'postition', 'phone_number', 'email']].sort_values(by='scores', ascending=False).drop_duplicates())
+    
+    new_phone_number = ''
     try:
         row = df[df['title']==record['title']]
         print(row)
+        # new_phone_number = st.text_input("Is this the phone number that you want to send the message to ?", row['phone_number'].values[0])
     except:
             pass
 
@@ -231,9 +217,15 @@ if clean_keywords != '':
     except:
         pass
 
+
+    st.write('---------------------------------------------')
+    st.bar_chart(df['postition'].value_counts())
+
+    fig = px.pie(df, names='postition', title='Positions Percentage')
+    st.write('---------------------------------------------')
+    st.plotly_chart(fig, use_container_width=True)
+
 else:
     st.error('Enter Some Keywords...')
-
-
 
 
